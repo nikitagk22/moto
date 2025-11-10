@@ -64,6 +64,11 @@ DIDS = {
     'ODOMETER_CANDIDATES': list(range(0xF191, 0xF1A0))  # Диапазон для поиска
 }
 
+# Найденные параметры одометра (заполните после эксперимента)
+ODOMETER_DID = None  # Например: 0xF192 (определяется экспериментально)
+ODOMETER_SCALE_FACTOR = 0.1  # 1, 0.1 или 0.01 (определяется экспериментально)
+ODOMETER_UNIT = 'km'  # 'km' или 'miles'
+
 # Режимы логирования
 LOG_LEVEL = 'INFO'  # DEBUG, INFO, WARNING, ERROR
 LOG_TO_FILE = True

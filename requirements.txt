@@ -1,0 +1,12 @@
+# Harley-Davidson Diagnostic Tool Requirements
+# Не требуется внешних зависимостей!
+# Используются только встроенные библиотеки Python:
+# - ctypes (для работы с J2534 DLL)
+# - threading (для фоновых потоков)
+# - logging (для логирования)
+# - argparse (для CLI)
+# - time, typing, sys, os
+
+# Python >= 3.7 required
+# Windows OS required
+# 32-bit Python recommended for DLL compatibility

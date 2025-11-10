@@ -336,3 +336,28 @@ class HarleyDiagnostics:
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Контекстный менеджер: выход"""
         self.disconnect()
+    
+    def save_discovered_params(self, odometer_did: int, scale_factor: float, unit: str = 'km'):
+        """Сохранение найденных параметров в файл"""
+        params_file = 'discovered_params.txt'
+        
+        try:
+            with open(params_file, 'w', encoding='utf-8') as f:
+                f.write("# Найденные параметры для Harley-Davidson\n")
+                f.write("# Скопируйте эти значения в config.py\n\n")
+                
+                if self.working_can_ids:
+                    req_id, resp_id = self.working_can_ids
+                    f.write(f"UDS_REQUEST_ID = 0x{req_id:03X}\n")
+                    f.write(f"UDS_RESPONSE_ID = 0x{resp_id:03X}\n\n")
+                
+                f.write(f"ODOMETER_DID = 0x{odometer_did:04X}\n")
+                f.write(f"ODOMETER_SCALE_FACTOR = {scale_factor}\n")
+                f.write(f"ODOMETER_UNIT = '{unit}'\n")
+            
+            logger.info(f"✅ Параметры сохранены в {params_file}")
+            print(f"\n✅ Найденные параметры сохранены в {params_file}")
+            print("📝 Скопируйте их в config.py для дальнейшего использования")
+            
+        except Exception as e:
+            logger.error(f"Ошибка сохранения параметров: {e}")

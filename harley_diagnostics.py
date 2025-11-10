@@ -36,11 +36,24 @@ class HarleyDiagnostics:
             self.j2534.open_device()
             self.j2534.connect_channel()
             
+            # Автоматический поиск рабочих CAN ID если включен
+            if self.auto_detect_can_ids:
+                logger.info("Автоматический поиск рабочих CAN ID...")
+                can_ids = self._find_working_can_ids()
+                if can_ids:
+                    request_id, response_id = can_ids
+                    logger.info(f"✅ Найдены рабочие CAN ID: Request=0x{request_id:03X}, Response=0x{response_id:03X}")
+                    self.working_can_ids = can_ids
+                else:
+                    logger.warning("⚠️ Не удалось найти рабочие CAN ID, используем стандартные")
+                    request_id = config.UDS_REQUEST_ID
+                    response_id = config.UDS_RESPONSE_ID
+            else:
+                request_id = config.UDS_REQUEST_ID
+                response_id = config.UDS_RESPONSE_ID
+            
             # Установка фильтра для ISO-TP
-            self.j2534.set_flow_control_filter(
-                config.UDS_REQUEST_ID,
-                config.UDS_RESPONSE_ID
-            )
+            self.j2534.set_flow_control_filter(request_id, response_id)
             
             # Запуск фонового чтения
             self.j2534.start_reading()
@@ -50,11 +63,7 @@ class HarleyDiagnostics:
             self.j2534.clear_buffers()
             
             # Инициализация ISO-TP и UDS
-            self.isotp = ISOTPHandler(
-                self.j2534,
-                config.UDS_REQUEST_ID,
-                config.UDS_RESPONSE_ID
-            )
+            self.isotp = ISOTPHandler(self.j2534, request_id, response_id)
             self.uds = UDSClient(self.isotp)
             
             # Переключение в расширенную диагностическую сессию
@@ -67,12 +76,52 @@ class HarleyDiagnostics:
             
             self.connected = True
             logger.info("✅ Подключение успешно!")
+            
+            # Вывод используемых CAN ID
+            logger.info(f"Используемые CAN ID: Request=0x{request_id:03X}, Response=0x{response_id:03X}")
+            
             return True
             
         except Exception as e:
             logger.error(f"❌ Ошибка подключения: {e}")
             self.disconnect()
             return False
+    
+    def _find_working_can_ids(self) -> Optional[tuple]:
+        """Автоматический поиск рабочих CAN ID"""
+        logger.info("Проверка CAN ID пар...")
+        
+        for request_id, response_id in config.ALTERNATIVE_CAN_IDS:
+            logger.info(f"Пробуем: Request=0x{request_id:03X}, Response=0x{response_id:03X}")
+            
+            try:
+                # Временная установка фильтра
+                self.j2534.set_flow_control_filter(request_id, response_id)
+                time.sleep(0.1)
+                
+                # Запуск чтения
+                if not self.j2534._read_thread or not self.j2534._read_thread.is_alive():
+                    self.j2534.start_reading()
+                
+                time.sleep(0.2)
+                self.j2534.clear_buffers()
+                
+                # Создание временных обработчиков
+                temp_isotp = ISOTPHandler(self.j2534, request_id, response_id)
+                temp_uds = UDSClient(temp_isotp)
+                
+                # Попытка прочитать VIN
+                vin_data = temp_uds.read_data_by_identifier(config.DIDS['VIN'])
+                
+                if vin_data and len(vin_data) == 17:
+                    logger.info(f"✅ Успех! Найдены рабочие CAN ID")
+                    return (request_id, response_id)
+                
+            except Exception as e:
+                logger.debug(f"Не подошло: {e}")
+                continue
+        
+        return None
     
     def disconnect(self):
         """Отключение от мотоцикла"""

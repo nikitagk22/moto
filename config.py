@@ -35,9 +35,14 @@ CAN_FLAGS = 0x00000000
 UDS_REQUEST_ID = 0x7E0  # Физический адрес запроса к ЭБУ
 UDS_RESPONSE_ID = 0x7E8  # Физический адрес ответа от ЭБУ
 
-# Альтернативные адреса для Harley (могут потребоваться)
-# UDS_REQUEST_ID = 0x18DA10F1  # Extended ID
-# UDS_RESPONSE_ID = 0x18DAF110  # Extended ID
+# Альтернативные CAN ID пары для автоматического перебора
+ALTERNATIVE_CAN_IDS = [
+    (0x7E0, 0x7E8),         # Стандартный физический адрес
+    (0x7DF, 0x7E8),         # Функциональный адрес
+    (0x18DA10F1, 0x18DAF110),  # Extended ID для Harley
+    (0x7E1, 0x7E9),         # BCM (Body Control Module)
+    (0x7E2, 0x7EA),         # Альтернативный ЭБУ
+]
 
 # ISO-TP параметры
 ISO_TP_BS = 0x00  # Block Size (0 = непрерывная передача)

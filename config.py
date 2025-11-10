@@ -1,11 +1,30 @@
 """Конфигурация для диагностики Harley-Davidson через J2534"""
 
+import os
+
 # Путь к J2534 DLL (настройте под вашу систему)
 J2534_DLL_PATH = r"C:\Program Files (x86)\OpenECU\OpenPort 2.0\drivers\openport 2.0\openport.dll"
 
-# Альтернативные пути (раскомментируйте при необходимости)
-# J2534_DLL_PATH = r"C:\Program Files\Tactrix\OpenPort 2.0\openport.dll"
-# J2534_DLL_PATH = r"openport.dll"  # Если DLL в PATH
+# Альтернативные пути (будут проверены автоматически)
+ALTERNATIVE_DLL_PATHS = [
+    r"C:\Program Files\Tactrix\OpenPort 2.0\openport.dll",
+    r"C:\Program Files (x86)\Tactrix\OpenPort 2.0\openport.dll",
+    r"C:\Program Files (x86)\OpenECU\OpenPort 2.0\drivers\openport 2.0\openport.dll",
+    r"openport.dll"  # Если DLL в PATH
+]
+
+def find_dll_path():
+    """Автоматический поиск DLL в стандартных путях"""
+    # Проверка основного пути
+    if os.path.exists(J2534_DLL_PATH):
+        return J2534_DLL_PATH
+    
+    # Проверка альтернативных путей
+    for path in ALTERNATIVE_DLL_PATHS:
+        if os.path.exists(path):
+            return path
+    
+    return None  # DLL не найдена
 
 # CAN параметры для HDLAN (Harley-Davidson Local Area Network)
 CAN_PROTOCOL = 'ISO15765'  # ISO 15765-4 (DoCAN)

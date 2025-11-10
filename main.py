@@ -121,7 +121,7 @@ def main():
     
     try:
         # Создание экземпляра диагностики
-        diag = HarleyDiagnostics()
+        diag = HarleyDiagnostics(auto_detect_can_ids=args.auto_detect)
         
         # Подключение
         if not diag.connect():

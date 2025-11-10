@@ -14,11 +14,13 @@ logger = logging.getLogger(__name__)
 class HarleyDiagnostics:
     """Основной класс для диагностики Harley-Davidson"""
     
-    def __init__(self):
+    def __init__(self, auto_detect_can_ids: bool = False):
         self.j2534 = None
         self.isotp = None
         self.uds = None
         self.connected = False
+        self.auto_detect_can_ids = auto_detect_can_ids
+        self.working_can_ids = None  # (request_id, response_id)
         
         logger.info("Инициализация Harley Diagnostics")
     

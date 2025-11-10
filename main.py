@@ -182,6 +182,12 @@ def main():
                     for interp in result['interpretations']:
                         print(f"    - {interp}")
             
+            # Сохранение найденных параметров
+            if args.save_params:
+                did = int(args.save_params[0], 16)
+                scale = float(args.save_params[1])
+                diag.save_discovered_params(did, scale)
+            
             print("\n" + "="*60)
             print("✅ Диагностика завершена успешно!")
             print("="*60)

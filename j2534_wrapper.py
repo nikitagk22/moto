@@ -19,7 +19,26 @@ class J2534Exception(Exception):
 class J2534Wrapper:
     """Обертка для J2534 PassThru API"""
     
-    def __init__(self, dll_path: str = config.J2534_DLL_PATH):
+    def __init__(self, dll_path: str = None):
+        # Автоматический поиск DLL если путь не указан
+        if dll_path is None:
+            dll_path = config.find_dll_path()
+            if dll_path is None:
+                raise J2534Exception(
+                    "Не удалось найти J2534 DLL!\n"
+                    "Проверьте установку драйверов OpenPort 2.0.\n"
+                    "Или укажите путь к DLL в config.py"
+                )
+            logger.info(f"Автоматически найден DLL: {dll_path}")
+        
+        # Проверка существования DLL
+        import os
+        if not os.path.exists(dll_path):
+            raise J2534Exception(
+                f"DLL файл не найден: {dll_path}\n"
+                f"Проверьте установку драйверов OpenPort 2.0"
+            )
+        
         self.dll_path = dll_path
         self.dll = None
         self.device_id = None

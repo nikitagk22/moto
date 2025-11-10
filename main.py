@@ -99,6 +99,12 @@ def main():
     parser.add_argument('--verbose', '-v', action='store_true',
                        help='Подробный вывод (DEBUG)')
     
+    parser.add_argument('--auto-detect', action='store_true',
+                       help='Автоматический поиск рабочих CAN ID')
+    
+    parser.add_argument('--save-params', nargs=2, metavar=('DID', 'SCALE'),
+                       help='Сохранить найденные параметры одометра (напр., 0xF192 0.1)')
+    
     args = parser.parse_args()
     
     # Настройка логирования

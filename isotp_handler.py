@@ -185,7 +185,65 @@ class ISOTPHandler:
                     
                     # Валидация данных кадра
                     if len(data) < 1:
-                        logger.debug(\"Пропущен пустой кадр\")\n                        continue\n                    \n                    frame_type = (data[0] >> 4) & 0x0F\n                    \n                    if frame_type == SINGLE_FRAME:\n                        # Single Frame\n                        length = data[0] & 0x0F\n                        \n                        # Валидация длины\n                        if length > 7:\n                            logger.warning(f\"⚠️ Недопустимая длина Single Frame: {length}\")\n                            continue\n                        \n                        if len(data) < (1 + length):\n                            logger.warning(f\"⚠️ Недостаточно данных в Single Frame\")\n                            continue\n                        \n                        payload = data[1:1+length]\n                        logger.debug(f\"✅ ISO-TP Single Frame принят: {payload.hex().upper()}\")\n                        return payload\n                    \n                    elif frame_type == FIRST_FRAME:\n                        # Multi-frame: First Frame\n                        try:\n                            return self._receive_multi_frame(data, timeout)\n                        except Exception as e:\n                            logger.error(f\"❌ Ошибка приёма multi-frame: {e}\")\n                            global_error_handler.handle_error(\n                                e,\n                                severity=ErrorSeverity.RECOVERABLE,\n                                category=ErrorCategory.PROTOCOL,\n                                recovery_hint=\"Проверьте качество соединения CAN шины\"\n                            )\n                            return None\n                \n                time.sleep(0.01)\n            \n            # Timeout\n            logger.warning(f\"⏱️ Timeout ожидания ISO-TP сообщения ({timeout} мс, получено {received_frames} кадров)\")\n            \n            if received_frames == 0:\n                global_error_handler.handle_error(\n                    Exception(\"Не получено ни одного CAN кадра\"),\n                    severity=ErrorSeverity.RECOVERABLE,\n                    category=ErrorCategory.TIMEOUT,\n                    context={\"timeout\": timeout, \"response_id\": f\"0x{self.response_id:03X}\"},\n                    recovery_hint=\"Проверьте CAN ID ответа или используйте --auto-detect\"\n                )\n            \n            return None\n            \n        except Exception as e:\n            global_error_handler.handle_error(\n                e,\n                severity=ErrorSeverity.RECOVERABLE,\n                category=ErrorCategory.PROTOCOL\n            )\n            return None
+                        logger.debug("Пропущен пустой кадр")
+                        continue
+                    
+                    frame_type = (data[0] >> 4) & 0x0F
+                    
+                    if frame_type == SINGLE_FRAME:
+                        # Single Frame
+                        length = data[0] & 0x0F
+                        
+                        # Валидация длины
+                        if length > 7:
+                            logger.warning(f"⚠️ Недопустимая длина Single Frame: {length}")
+                            continue
+                        
+                        if len(data) < (1 + length):
+                            logger.warning(f"⚠️ Недостаточно данных в Single Frame")
+                            continue
+                        
+                        payload = data[1:1+length]
+                        logger.debug(f"✅ ISO-TP Single Frame принят: {payload.hex().upper()}")
+                        return payload
+                    
+                    elif frame_type == FIRST_FRAME:
+                        # Multi-frame: First Frame
+                        try:
+                            return self._receive_multi_frame(data, timeout)
+                        except Exception as e:
+                            logger.error(f"❌ Ошибка приёма multi-frame: {e}")
+                            global_error_handler.handle_error(
+                                e,
+                                severity=ErrorSeverity.RECOVERABLE,
+                                category=ErrorCategory.PROTOCOL,
+                                recovery_hint="Проверьте качество соединения CAN шины"
+                            )
+                            return None
+                
+                time.sleep(0.01)
+            
+            # Timeout
+            logger.warning(f"⏱️ Timeout ожидания ISO-TP сообщения ({timeout} мс, получено {received_frames} кадров)")
+            
+            if received_frames == 0:
+                global_error_handler.handle_error(
+                    Exception("Не получено ни одного CAN кадра"),
+                    severity=ErrorSeverity.RECOVERABLE,
+                    category=ErrorCategory.TIMEOUT,
+                    context={"timeout": timeout, "response_id": f"0x{self.response_id:03X}"},
+                    recovery_hint="Проверьте CAN ID ответа или используйте --auto-detect"
+                )
+            
+            return None
+            
+        except Exception as e:
+            global_error_handler.handle_error(
+                e,
+                severity=ErrorSeverity.RECOVERABLE,
+                category=ErrorCategory.PROTOCOL
+            )
+            return None
     
     def _receive_multi_frame(self, first_frame_data: bytes, timeout: int) -> Optional[bytes]:
         """Прием многокадрового сообщения"""

@@ -355,48 +355,117 @@ class HarleyDiagnostics:
     
     def scan_for_odometer(self, start_did: int = 0xF191, end_did: int = 0xF1A0) -> Optional[Dict[str, Any]]:
         """
-        Сканирование DIDs для поиска одометра (пробега)
+        Сканирование DIDs для поиска одометра (пробега) с улучшенной обработкой
         Возвращает словарь с найденными DID и их данными
         """
         if not self.connected:
-            logger.error("Не подключено к мотоциклу")
+            error = Exception("Не подключено к мотоциклу")
+            global_error_handler.handle_error(
+                error,
+                severity=ErrorSeverity.CRITICAL,
+                category=ErrorCategory.CONNECTION,
+                recovery_hint="Сначала выполните подключение"
+            )
             return None
+        
+        # Валидация диапазона
+        if start_did < 0 or start_did > 0xFFFF or end_did < 0 or end_did > 0xFFFF:
+            error = ValueError(f"Недопустимый диапазон DIDs: 0x{start_did:04X} - 0x{end_did:04X}")
+            global_error_handler.handle_error(
+                error,
+                severity=ErrorSeverity.WARNING,
+                category=ErrorCategory.DATA,
+                recovery_hint="DID должны быть в диапазоне 0x0000-0xFFFF"
+            )
+            return None
+        
+        if start_did > end_did:
+            logger.warning(f"⚠️ Начальный DID больше конечного, меняем местами")
+            start_did, end_did = end_did, start_did
+        
+        total_dids = end_did - start_did + 1
+        if total_dids > 1000:
+            logger.warning(f"⚠️ Большой диапазон сканирования: {total_dids} DIDs. Это может занять много времени.")
         
         logger.info("-" * 60)
         logger.info(f"🔍 Сканирование DIDs 0x{start_did:04X} - 0x{end_did:04X} для поиска одометра...")
+        logger.info(f"   Всего DIDs для проверки: {total_dids}")
+        logger.info("-" * 60)
         
         results = {}
+        successful_reads = 0
+        failed_reads = 0
+        progress_interval = max(1, total_dids // 20)  # Вывод прогресса каждые 5%
         
-        for did in range(start_did, end_did + 1):
-            try:
-                data = self.uds.read_data_by_identifier(did)
-                
-                if data:
-                    # Анализ данных
-                    results[did] = {
-                        'raw_data': data.hex().upper(),
-                        'length': len(data),
-                        'possible_values': self._analyze_odometer_data(data)
-                    }
+        try:
+            for index, did in enumerate(range(start_did, end_did + 1), 1):
+                try:
+                    # Вывод прогресса
+                    if index % progress_interval == 0 or index == total_dids:
+                        progress = (index / total_dids) * 100
+                        logger.info(f"📊 Прогресс: {progress:.0f}% ({index}/{total_dids}) - найдено: {successful_reads}")
                     
-                    logger.info(f"✅ DID 0x{did:04X}: {data.hex().upper()} ({len(data)} байт)")
+                    data = self.uds.read_data_by_identifier(did)
                     
-                    # Анализ возможных значений
-                    for interpretation in results[did]['possible_values']:
-                        logger.info(f"   ➡️ {interpretation}")
+                    if data:
+                        successful_reads += 1
+                        
+                        # Анализ данных
+                        results[did] = {
+                            'raw_data': data.hex().upper(),
+                            'length': len(data),
+                            'possible_values': self._analyze_odometer_data(data)
+                        }
+                        
+                        logger.info(f"✅ DID 0x{did:04X}: {data.hex().upper()} ({len(data)} байт)")
+                        
+                        # Анализ возможных значений
+                        for interpretation in results[did]['possible_values']:
+                            logger.info(f"   ➡️ {interpretation}")
+                    else:
+                        failed_reads += 1
+                    
+                    # Небольшая задержка между запросами для стабильности
+                    time.sleep(0.1)
+                    
+                except KeyboardInterrupt:
+                    logger.warning("⚠️ Сканирование прервано пользователем")
+                    break
+                except Exception as e:
+                    failed_reads += 1
+                    logger.debug(f"DID 0x{did:04X}: недоступен ({e})")
+            
+            # Итоговая статистика
+            logger.info("-" * 60)
+            logger.info(f"📊 РЕЗУЛЬТАТЫ СКАНИРОВАНИЯ:")
+            logger.info(f"   Успешно прочитано: {successful_reads} DIDs")
+            logger.info(f"   Не удалось прочитать: {failed_reads} DIDs")
+            logger.info(f"   Всего проверено: {successful_reads + failed_reads} из {total_dids}")
+            logger.info("-" * 60)
+            
+            if results:
+                logger.info(f"✅ Найдено {len(results)} доступных DIDs")
+                logger.info("💡 Сравните полученные значения с показаниями на панели мотоцикла")
+                return results
+            else:
+                logger.warning("⚠️ Не найдено доступных DIDs в указанном диапазоне")
+                global_error_handler.handle_error(
+                    Exception("No DIDs found in scan range"),
+                    severity=ErrorSeverity.WARNING,
+                    category=ErrorCategory.DATA,
+                    recovery_hint="Попробуйте другой диапазон или используйте --auto-detect"
+                )
+                return None
                 
-                # Небольшая задержка между запросами
-                time.sleep(0.1)
-                
-            except Exception as e:
-                logger.debug(f"DID 0x{did:04X}: недоступен")
-        
-        if results:
-            logger.info(f"\n✅ Найдено {len(results)} доступных DIDs")
-            return results
-        else:
-            logger.warning("⚠️ Не найдено доступных DIDs в указанном диапазоне")
-            return None
+        except Exception as e:
+            logger.error(f"❌ Критическая ошибка во время сканирования: {e}")
+            global_error_handler.handle_error(
+                e,
+                severity=ErrorSeverity.CRITICAL,
+                category=ErrorCategory.SYSTEM,
+                context={"scanned": successful_reads, "failed": failed_reads}
+            )
+            return results if results else None
     
     def _analyze_odometer_data(self, data: bytes) -> List[str]:
         """Анализ данных для определения возможных значений пробега"""

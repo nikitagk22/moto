@@ -430,6 +430,54 @@ class J2534Wrapper:
         except Exception as e:
             logger.warning(f"Ошибка очистки буферов: {e}")
     
+    def health_check(self) -> bool:
+        """Проверка здоровья соединения"""
+        try:
+            # Проверка основных параметров
+            if self.device_id is None:
+                logger.warning("⚠️ Health check: Устройство не открыто")
+                return False
+            
+            if self.channel_id is None:
+                logger.warning("⚠️ Health check: Канал не подключен")
+                return False
+            
+            # Проверка потока чтения
+            if self._read_thread is None or not self._read_thread.is_alive():
+                logger.warning("⚠️ Health check: Поток чтения не активен")
+                return False
+            
+            # Попытка очистки буферов (как тест связи)
+            try:
+                self.clear_buffers()
+                logger.debug("✅ Health check: OK")
+                return True
+            except Exception as e:
+                logger.error(f"❌ Health check: Ошибка связи - {e}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Health check: Критическая ошибка - {e}")
+            global_error_handler.handle_error(
+                e,
+                severity=ErrorSeverity.WARNING,
+                category=ErrorCategory.CONNECTION,
+                recovery_hint="Проверьте физическое подключение адаптера"
+            )
+            return False
+    
+    def get_connection_state(self) -> dict:
+        """Получение текущего состояния соединения"""
+        return {
+            "device_id": self.device_id,
+            "channel_id": self.channel_id,
+            "filter_id": self.filter_id,
+            "dll_path": self.dll_path,
+            "read_thread_alive": self._read_thread.is_alive() if self._read_thread else False,
+            "message_queue_size": len(self._message_queue),
+            "health_status": "OK" if self.health_check() else "FAILED"
+        }
+    
     def __enter__(self):
         """Контекстный менеджер: вход"""
         self.open_device()

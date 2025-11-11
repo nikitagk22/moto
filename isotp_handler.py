@@ -39,15 +39,51 @@ class ISOTPHandler:
         logger.info(f"ISO-TP инициализирован: Request=0x{request_id:03X}, Response=0x{response_id:03X}")
     
     def send(self, data: bytes) -> bool:
-        """Отправка данных с использованием ISO-TP"""
-        data_len = len(data)
-        
-        if data_len <= 7:
-            # Single Frame (до 7 байт данных)
-            return self._send_single_frame(data)
-        else:
-            # Multi-frame (более 7 байт)
-            return self._send_multi_frame(data)
+        """Отправка данных с использованием ISO-TP и валидацией"""
+        try:
+            # Валидация данных
+            if not data:
+                logger.error("❌ Попытка отправить пустые данные")
+                return False
+            
+            data_len = len(data)
+            
+            # Проверка максимального размера (4095 байт для ISO-TP)
+            if data_len > 4095:
+                error = ValueError(f"Данные слишком большие для ISO-TP: {data_len} байт (макс 4095)")
+                global_error_handler.handle_error(
+                    error,
+                    severity=ErrorSeverity.WARNING,
+                    category=ErrorCategory.DATA,
+                    recovery_hint="Разделите данные на меньшие части"
+                )
+                return False
+            
+            if data_len <= 7:
+                # Single Frame (до 7 байт данных)
+                result = self._send_single_frame(data)
+            else:
+                # Multi-frame (более 7 байт)
+                result = self._send_multi_frame(data)
+            
+            if not result:
+                global_error_handler.handle_error(
+                    Exception("Не удалось отправить ISO-TP сообщение"),
+                    severity=ErrorSeverity.RECOVERABLE,
+                    category=ErrorCategory.PROTOCOL,
+                    context={"data_length": data_len}
+                )
+            
+            return result
+            
+        except Exception as e:
+            global_error_handler.handle_error(
+                e,
+                severity=ErrorSeverity.RECOVERABLE,
+                category=ErrorCategory.PROTOCOL,
+                context={"data_length": len(data) if data else 0}
+            )
+            return False
     
     def _send_single_frame(self, data: bytes) -> bool:
         """Отправка Single Frame"""

@@ -27,67 +27,208 @@ class HarleyDiagnostics:
         logger.info("Инициализация Harley Diagnostics")
     
     def connect(self) -> bool:
-        """Подключение к мотоциклу"""
-        try:
-            logger.info("="*60)
-            logger.info("Начало подключения к Harley-Davidson XG750A")
-            logger.info("="*60)
+        """Подключение к мотоциклу с автоматической диагностикой и восстановлением"""
+        connection_attempts = 0
+        max_connection_attempts = config.MAX_RETRY_ATTEMPTS
+        
+        while connection_attempts < max_connection_attempts:
+            connection_attempts += 1
             
-            # Инициализация J2534
-            self.j2534 = J2534Wrapper()
-            self.j2534.open_device()
-            self.j2534.connect_channel()
-            
-            # Автоматический поиск рабочих CAN ID если включен
-            if self.auto_detect_can_ids:
-                logger.info("Автоматический поиск рабочих CAN ID...")
-                can_ids = self._find_working_can_ids()
-                if can_ids:
-                    request_id, response_id = can_ids
-                    logger.info(f"✅ Найдены рабочие CAN ID: Request=0x{request_id:03X}, Response=0x{response_id:03X}")
-                    self.working_can_ids = can_ids
+            try:
+                logger.info("="*60)
+                logger.info(f"Начало подключения к Harley-Davidson XG750A (попытка {connection_attempts}/{max_connection_attempts})")
+                logger.info("="*60)
+                
+                # Предварительная диагностика
+                self._pre_connection_diagnostics()
+                
+                # Инициализация J2534
+                logger.info("📡 Инициализация J2534 адаптера...")
+                self.j2534 = J2534Wrapper()
+                self.j2534.open_device()
+                self.j2534.connect_channel()
+                
+                # Проверка здоровья адаптера
+                if not self.j2534.health_check():
+                    raise DiagnosticError(
+                        "Адаптер не прошёл проверку здоровья",
+                        severity=ErrorSeverity.CRITICAL,
+                        category=ErrorCategory.HARDWARE
+                    )
+                
+                # Автоматический поиск рабочих CAN ID если включен
+                request_id, response_id = self._determine_can_ids()
+                
+                # Установка фильтра для ISO-TP
+                logger.info("🔧 Настройка фильтров ISO-TP...")
+                self.j2534.set_flow_control_filter(request_id, response_id)
+                
+                # Запуск фонового чтения
+                self.j2534.start_reading()
+                
+                # Очистка буферов
+                time.sleep(0.2)
+                self.j2534.clear_buffers()
+                
+                # Инициализация ISO-TP и UDS
+                logger.info("🔗 Инициализация протоколов ISO-TP и UDS...")
+                self.isotp = ISOTPHandler(self.j2534, request_id, response_id)
+                self.uds = UDSClient(self.isotp)
+                
+                # Переключение в расширенную диагностическую сессию
+                logger.info("🔐 Переключение в Extended Diagnostic Session...")
+                session_success = False
+                try:
+                    session_success = self.uds.diagnostic_session_control(EXTENDED_DIAGNOSTIC_SESSION)
+                except Exception as e:
+                    logger.warning(f"⚠️ Ошибка переключения сессии: {e}")
+                
+                if not session_success:
+                    logger.warning("⚠️ Не удалось переключиться в расширенную сессию, продолжаем в стандартной")
+                    global_error_handler.handle_error(
+                        Exception("Extended session not available"),
+                        severity=ErrorSeverity.WARNING,
+                        category=ErrorCategory.PROTOCOL,
+                        recovery_hint="Некоторые функции могут быть недоступны в стандартной сессии"
+                    )
+                
+                # Запуск TesterPresent
+                self.uds.start_tester_present()
+                
+                # Финальная проверка соединения
+                if not self._verify_connection():
+                    raise DiagnosticError(
+                        "Соединение установлено, но проверка связи не прошла",
+                        severity=ErrorSeverity.CRITICAL,
+                        category=ErrorCategory.CONNECTION
+                    )
+                
+                self.connected = True
+                logger.info("="*60)
+                logger.info("✅ ПОДКЛЮЧЕНИЕ УСПЕШНО!")
+                logger.info(f"   CAN ID: Request=0x{request_id:03X}, Response=0x{response_id:03X}")
+                logger.info("="*60)
+                
+                return True
+                
+            except DiagnosticError as e:
+                logger.error(f"❌ Диагностическая ошибка подключения: {e.message}")
+                global_error_handler.handle_error(e, severity=e.severity, category=e.category)
+                
+                if connection_attempts < max_connection_attempts:
+                    delay = config.RETRY_INITIAL_DELAY * (config.RETRY_BACKOFF_FACTOR ** (connection_attempts - 1))
+                    logger.info(f"⏳ Повтор подключения через {delay:.1f} секунд...")
+                    time.sleep(delay)
+                    self.disconnect()  # Очистка перед повтором
                 else:
-                    logger.warning("⚠️ Не удалось найти рабочие CAN ID, используем стандартные")
-                    request_id = config.UDS_REQUEST_ID
-                    response_id = config.UDS_RESPONSE_ID
+                    self._generate_connection_failure_report(e)
+                    
+            except Exception as e:
+                logger.error(f"❌ Неожиданная ошибка подключения: {e}")
+                global_error_handler.handle_error(
+                    e,
+                    severity=ErrorSeverity.CRITICAL,
+                    category=ErrorCategory.CONNECTION
+                )
+                
+                if connection_attempts < max_connection_attempts:
+                    delay = config.RETRY_INITIAL_DELAY * (config.RETRY_BACKOFF_FACTOR ** (connection_attempts - 1))
+                    logger.info(f"⏳ Повтор подключения через {delay:.1f} секунд...")
+                    time.sleep(delay)
+                    self.disconnect()
+                else:
+                    self._generate_connection_failure_report(e)
+        
+        # Все попытки исчерпаны
+        logger.error(f"❌ Не удалось подключиться после {max_connection_attempts} попыток")
+        self.disconnect()
+        return False
+    
+    def _pre_connection_diagnostics(self):
+        """Предварительная диагностика перед подключением"""
+        logger.info("🔍 Выполнение предварительной диагностики...")
+        
+        # Проверка DLL
+        dll_path = config.find_dll_path()
+        if dll_path is None:
+            raise DiagnosticError(
+                "J2534 DLL не найден",
+                severity=ErrorSeverity.FATAL,
+                category=ErrorCategory.CONFIGURATION,
+                recovery_hint="Установите драйверы OpenPort 2.0 или укажите путь к DLL в config.py"
+            )
+        logger.info(f"✅ J2534 DLL найден: {dll_path}")
+    
+    def _determine_can_ids(self) -> tuple:
+        """Определение рабочих CAN ID"""
+        if self.auto_detect_can_ids:
+            logger.info("🔎 Автоматический поиск рабочих CAN ID...")
+            can_ids = self._find_working_can_ids()
+            if can_ids:
+                request_id, response_id = can_ids
+                logger.info(f"✅ Найдены рабочие CAN ID: Request=0x{request_id:03X}, Response=0x{response_id:03X}")
+                self.working_can_ids = can_ids
+                return can_ids
             else:
-                request_id = config.UDS_REQUEST_ID
-                response_id = config.UDS_RESPONSE_ID
-            
-            # Установка фильтра для ISO-TP
-            self.j2534.set_flow_control_filter(request_id, response_id)
-            
-            # Запуск фонового чтения
-            self.j2534.start_reading()
-            
-            # Очистка буферов
-            time.sleep(0.2)
-            self.j2534.clear_buffers()
-            
-            # Инициализация ISO-TP и UDS
-            self.isotp = ISOTPHandler(self.j2534, request_id, response_id)
-            self.uds = UDSClient(self.isotp)
-            
-            # Переключение в расширенную диагностическую сессию
-            logger.info("Переключение в Extended Diagnostic Session...")
-            if not self.uds.diagnostic_session_control(EXTENDED_DIAGNOSTIC_SESSION):
-                logger.warning("Не удалось переключиться в расширенную сессию, продолжаем в стандартной")
-            
-            # Запуск TesterPresent
-            self.uds.start_tester_present()
-            
-            self.connected = True
-            logger.info("✅ Подключение успешно!")
-            
-            # Вывод используемых CAN ID
-            logger.info(f"Используемые CAN ID: Request=0x{request_id:03X}, Response=0x{response_id:03X}")
-            
-            return True
-            
+                logger.warning("⚠️ Автопоиск не дал результатов, используем стандартные CAN ID")
+                global_error_handler.handle_error(
+                    Exception("Auto-detect failed"),
+                    severity=ErrorSeverity.WARNING,
+                    category=ErrorCategory.CONFIGURATION,
+                    recovery_hint="Проверьте подключение к диагностическому порту мотоцикла"
+                )
+        
+        # Использование стандартных ID
+        request_id = config.UDS_REQUEST_ID
+        response_id = config.UDS_RESPONSE_ID
+        logger.info(f"📋 Используем стандартные CAN ID: Request=0x{request_id:03X}, Response=0x{response_id:03X}")
+        return (request_id, response_id)
+    
+    def _verify_connection(self) -> bool:
+        """Проверка соединения после подключения"""
+        logger.info("✓ Проверка соединения с ЭБУ...")
+        
+        try:
+            # Попытка прочитать VIN для проверки
+            test_data = self.uds.read_data_by_identifier(config.DIDS['VIN'])
+            if test_data and len(test_data) == 17:
+                logger.info("✅ Связь с ЭБУ подтверждена")
+                return True
+            else:
+                logger.warning("⚠️ Связь установлена, но ответ от ЭБУ некорректен")
+                return False
         except Exception as e:
-            logger.error(f"❌ Ошибка подключения: {e}")
-            self.disconnect()
+            logger.error(f"❌ Ошибка проверки связи: {e}")
             return False
+    
+    def _generate_connection_failure_report(self, error: Exception):
+        """Генерация отчёта о сбое подключения"""
+        if config.ENABLE_DIAGNOSTIC_REPORTS:
+            try:
+                connection_state = {
+                    "auto_detect_enabled": self.auto_detect_can_ids,
+                    "working_can_ids": str(self.working_can_ids) if self.working_can_ids else "None",
+                    "j2534_state": self.j2534.get_connection_state() if self.j2534 else "Not initialized"
+                }
+                
+                operation_context = {
+                    "operation": "connection",
+                    "error": str(error),
+                    "attempts": config.MAX_RETRY_ATTEMPTS
+                }
+                
+                report_path = global_diagnostic_reporter.generate_report(
+                    global_error_handler,
+                    connection_state=connection_state,
+                    operation_context=operation_context
+                )
+                
+                if report_path:
+                    logger.info(f"📄 Диагностический отчёт сохранён: {report_path}")
+                    print(f"\n📄 Диагностический отчёт сохранён: {report_path}")
+                    print("   Изучите отчёт для получения рекомендаций по устранению проблемы.\n")
+            except Exception as report_error:
+                logger.error(f"Ошибка генерации отчёта: {report_error}")
     
     def _find_working_can_ids(self) -> Optional[tuple]:
         """Автоматический поиск рабочих CAN ID"""

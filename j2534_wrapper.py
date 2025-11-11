@@ -168,17 +168,37 @@ class J2534Wrapper:
             raise J2534Exception(f"{function_name}: {error_msg} (0x{result:02X})")
     
     def open_device(self) -> int:
-        """Открытие устройства J2534"""
-        if self.dll is None:
-            self._load_dll()
-        
-        device_id = ctypes.c_ulong(0)
-        result = self.dll.PassThruOpen(None, ctypes.byref(device_id))
-        self._check_error(result, "PassThruOpen")
-        
-        self.device_id = device_id.value
-        logger.info(f"Устройство открыто, DeviceID: {self.device_id}")
-        return self.device_id
+        """Открытие устройства J2534 с retry механизмом"""
+        try:
+            if self.dll is None:
+                self._load_dll()
+            
+            # Retry механизм для открытия устройства
+            def _open_attempt():
+                device_id = ctypes.c_ulong(0)
+                result = self.dll.PassThruOpen(None, ctypes.byref(device_id))
+                self._check_error(result, "PassThruOpen")
+                return device_id.value
+            
+            self.device_id = global_error_handler.retry_with_recovery(
+                _open_attempt,
+                max_attempts=config.MAX_RETRY_ATTEMPTS,
+                initial_delay=config.RETRY_INITIAL_DELAY,
+                backoff_factor=config.RETRY_BACKOFF_FACTOR,
+                error_category=ErrorCategory.HARDWARE
+            )
+            
+            logger.info(f"✅ Устройство открыто, DeviceID: {self.device_id}")
+            return self.device_id
+            
+        except Exception as e:
+            global_error_handler.handle_error(
+                e,
+                severity=ErrorSeverity.FATAL,
+                category=ErrorCategory.HARDWARE,
+                recovery_hint="Проверьте подключение OpenPort 2.0 к USB и перезапустите программу"
+            )
+            raise
     
     def close_device(self):
         """Закрытие устройства J2534"""

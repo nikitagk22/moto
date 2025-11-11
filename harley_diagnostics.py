@@ -267,22 +267,61 @@ class HarleyDiagnostics:
         return None
     
     def disconnect(self):
-        """Отключение от мотоцикла"""
-        logger.info("Отключение...")
+        """Отключение от мотоцикла с graceful shutdown"""
+        logger.info("🔌 Отключение...")
+        
+        disconnect_errors = []
         
         try:
+            # Остановка TesterPresent
             if self.uds:
-                self.uds.stop_tester_present()
+                try:
+                    logger.info("   Остановка TesterPresent...")
+                    self.uds.stop_tester_present()
+                except Exception as e:
+                    logger.warning(f"⚠️ Ошибка остановки TesterPresent: {e}")
+                    disconnect_errors.append(("TesterPresent", str(e)))
             
+            # Отключение канала J2534
             if self.j2534:
-                self.j2534.disconnect_channel()
-                self.j2534.close_device()
+                try:
+                    logger.info("   Отключение канала J2534...")
+                    self.j2534.disconnect_channel()
+                except Exception as e:
+                    logger.warning(f"⚠️ Ошибка отключения канала: {e}")
+                    disconnect_errors.append(("J2534 Channel", str(e)))
+                
+                # Закрытие устройства J2534
+                try:
+                    logger.info("   Закрытие устройства J2534...")
+                    self.j2534.close_device()
+                except Exception as e:
+                    logger.warning(f"⚠️ Ошибка закрытия устройства: {e}")
+                    disconnect_errors.append(("J2534 Device", str(e)))
             
             self.connected = False
-            logger.info("✅ Отключение успешно")
+            
+            if disconnect_errors:
+                logger.warning(f"⚠️ Отключение завершено с {len(disconnect_errors)} предупреждениями")
+                for component, error in disconnect_errors:
+                    logger.debug(f"   {component}: {error}")
+            else:
+                logger.info("✅ Отключение успешно")
             
         except Exception as e:
-            logger.error(f"Ошибка при отключении: {e}")
+            logger.error(f"❌ Критическая ошибка при отключении: {e}")
+            global_error_handler.handle_error(
+                e,
+                severity=ErrorSeverity.WARNING,  # Не критично, т.к. мы уже завершаем
+                category=ErrorCategory.CONNECTION,
+                recovery_hint="Отключите адаптер физически и перезапустите программу"
+            )
+        finally:
+            # Гарантированная очистка состояния
+            self.connected = False
+            self.j2534 = None
+            self.isotp = None
+            self.uds = None
     
     def read_vin(self) -> Optional[str]:
         """Чтение VIN (идентификационного номера транспортного средства) с retry"""

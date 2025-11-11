@@ -73,3 +73,14 @@ ODOMETER_UNIT = 'km'  # 'km' или 'miles'
 LOG_LEVEL = 'INFO'  # DEBUG, INFO, WARNING, ERROR
 LOG_TO_FILE = True
 LOG_FILE = 'harley_diagnostics.log'
+
+# Параметры обработки ошибок и восстановления
+MAX_RETRY_ATTEMPTS = 3  # Максимальное количество попыток retry
+RETRY_INITIAL_DELAY = 1.0  # Начальная задержка между попытками (сек)
+RETRY_BACKOFF_FACTOR = 2.0  # Множитель для exponential backoff
+ENABLE_AUTO_RECOVERY = True  # Автоматическое восстановление соединения
+CONNECTION_HEALTH_CHECK_INTERVAL = 30.0  # Интервал проверки здоровья соединения (сек)
+
+# Параметры автоматической диагностики
+ENABLE_DIAGNOSTIC_REPORTS = True  # Автоматическая генерация отчётов при сбоях
+AUTO_SAVE_CRITICAL_LOGS = True  # Автоматическое сохранение логов при критических ошибках

@@ -6,6 +6,7 @@ from typing import Optional, Dict, Any
 
 import config
 from isotp_handler import ISOTPHandler
+from error_handler import global_error_handler, ErrorSeverity, ErrorCategory, DiagnosticError
 
 logger = logging.getLogger(__name__)
 

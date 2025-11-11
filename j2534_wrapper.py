@@ -7,6 +7,7 @@ from typing import Optional, List, Tuple
 
 from j2534_constants import *
 import config
+from error_handler import global_error_handler, ErrorSeverity, ErrorCategory, DiagnosticError
 
 logger = logging.getLogger(__name__)
 

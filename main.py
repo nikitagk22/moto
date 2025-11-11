@@ -27,12 +27,15 @@ import sys
 import logging
 import argparse
 import os
+import traceback
 
 # Добавление текущей директории в PYTHONPATH
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config
 from harley_diagnostics import HarleyDiagnostics
+from error_handler import global_error_handler, ErrorSeverity, ErrorCategory, DiagnosticError
+from diagnostic_report import global_diagnostic_reporter
 
 
 def setup_logging(verbose: bool = False):

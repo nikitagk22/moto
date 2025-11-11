@@ -195,27 +195,79 @@ class UDSClient:
             return False
     
     def read_data_by_identifier(self, did: int) -> Optional[bytes]:
-        """Чтение данных по идентификатору (0x22)"""
+        """Чтение данных по идентификатору (0x22) с retry механизмом"""
+        
+        # Валидация DID
+        if did < 0 or did > 0xFFFF:
+            error = ValueError(f"Недопустимый DID: 0x{did:04X}")
+            global_error_handler.handle_error(
+                error,
+                severity=ErrorSeverity.WARNING,
+                category=ErrorCategory.DATA,
+                recovery_hint="DID должен быть в диапазоне 0x0000-0xFFFF"
+            )
+            return None
+        
         did_bytes = bytes([did >> 8, did & 0xFF])
-        logger.info(f"Чтение DID: 0x{did:04X}")
+        logger.info(f"🔍 Чтение DID: 0x{did:04X}")
         
         try:
-            response = self.send_request(READ_DATA_BY_IDENTIFIER, did_bytes, timeout=2000)
-            
-            if response is not None and len(response) >= 2:
+            # Retry механизм для чтения DID
+            def _read_attempt():
+                response = self.send_request(READ_DATA_BY_IDENTIFIER, did_bytes, timeout=2000)
+                
+                if response is None:
+                    raise Exception(f"Нет ответа от ЭБУ для DID 0x{did:04X}")
+                
+                if len(response) < 2:
+                    raise Exception(f"Некорректная длина ответа: {len(response)} байт")
+                
                 # Проверка DID в ответе
                 response_did = (response[0] << 8) | response[1]
-                if response_did == did:
-                    data = response[2:]
-                    logger.info(f"DID 0x{did:04X}: {data.hex().upper()} ({len(data)} байт)")
-                    return data
-                else:
-                    logger.warning(f"Несоответствие DID: ожидался 0x{did:04X}, получен 0x{response_did:04X}")
+                if response_did != did:
+                    raise Exception(f"Несоответствие DID: ожидался 0x{did:04X}, получен 0x{response_did:04X}")
+                
+                data = response[2:]
+                
+                # Валидация данных
+                if len(data) == 0:
+                    logger.warning(f"⚠️ DID 0x{did:04X} вернул пустые данные")
+                
+                logger.info(f"✅ DID 0x{did:04X}: {data.hex().upper()} ({len(data)} байт)")
+                return data
             
-            return None
-            
+            # Попытка с retry (только для временных ошибок)
+            try:
+                return _read_attempt()
+            except UDSException:
+                # UDS ошибки (например NRC) не требуют retry
+                return None
+            except Exception as e:
+                # Для других ошибок пытаемся retry
+                logger.warning(f"⚠️ Ошибка чтения DID 0x{did:04X}, попытка повтора...")
+                time.sleep(0.5)
+                try:
+                    return _read_attempt()
+                except Exception:
+                    global_error_handler.handle_error(
+                        e,
+                        severity=ErrorSeverity.WARNING,
+                        category=ErrorCategory.DATA,
+                        context={"did": f"0x{did:04X}"},
+                        recovery_hint=f"DID 0x{did:04X} может быть недоступен для этого ЭБУ"
+                    )
+                    return None
+                    
         except UDSException as e:
-            logger.error(f"Ошибка чтения DID 0x{did:04X}: {e}")
+            logger.error(f"❌ UDS ошибка чтения DID 0x{did:04X}: {e}")
+            return None
+        except Exception as e:
+            global_error_handler.handle_error(
+                e,
+                severity=ErrorSeverity.RECOVERABLE,
+                category=ErrorCategory.DATA,
+                context={"did": f"0x{did:04X}"}
+            )
             return None
     
     def start_tester_present(self, interval: float = config.TESTER_PRESENT_INTERVAL):

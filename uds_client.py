@@ -65,54 +65,105 @@ class UDSClient:
         logger.info("UDS клиент инициализирован")
     
     def send_request(self, service_id: int, data: bytes = b'', timeout: Optional[int] = None) -> Optional[bytes]:
-        """Отправка UDS запроса и получение ответа"""
-        request = bytes([service_id]) + data
-        logger.debug(f"UDS Request: {request.hex().upper()}")
-        
-        # Отправка через ISO-TP
-        if not self.isotp.send(request):
-            logger.error("Ошибка отправки UDS запроса")
-            return None
-        
-        # Прием ответа
-        if timeout is None:
-            timeout = config.ISO_TP_TIMEOUT
-        
-        response = self.isotp.receive(timeout=timeout)
-        
-        if response is None:
-            logger.error("Timeout ожидания UDS ответа")
-            return None
-        
-        logger.debug(f"UDS Response: {response.hex().upper()}")
-        
-        # Проверка ответа
-        if len(response) < 1:
-            logger.error("Пустой ответ UDS")
-            return None
-        
-        response_sid = response[0]
-        
-        # Положительный ответ
-        if response_sid == service_id + POSITIVE_RESPONSE_OFFSET:
-            logger.info(f"UDS положительный ответ на сервис 0x{service_id:02X}")
-            return response[1:]  # Возвращаем данные без SID
-        
-        # Отрицательный ответ
-        elif response_sid == NEGATIVE_RESPONSE:
-            if len(response) >= 3:
-                requested_sid = response[1]
-                nrc = response[2]
-                nrc_desc = NRC_DESCRIPTIONS.get(nrc, f"Unknown NRC: 0x{nrc:02X}")
-                logger.error(f"UDS отрицательный ответ: SID=0x{requested_sid:02X}, NRC=0x{nrc:02X} ({nrc_desc})")
-                raise UDSException(f"Negative response: {nrc_desc} (0x{nrc:02X})")
+        """Отправка UDS запроса и получение ответа с обработкой ошибок"""
+        try:
+            request = bytes([service_id]) + data
+            logger.debug(f"UDS Request: {request.hex().upper()}")
+            
+            # Валидация запроса
+            if len(request) > 4095:  # Максимальный размер UDS сообщения
+                raise ValueError(f"UDS запрос слишком большой: {len(request)} байт")
+            
+            # Отправка через ISO-TP с retry
+            send_attempts = 0
+            max_send_attempts = 2
+            
+            while send_attempts < max_send_attempts:
+                if self.isotp.send(request):
+                    break
+                send_attempts += 1
+                if send_attempts < max_send_attempts:
+                    logger.warning(f"⚠️ Повтор отправки UDS запроса (попытка {send_attempts + 1})")
+                    time.sleep(0.1)
             else:
-                logger.error("Некорректный отрицательный ответ UDS")
+                error = Exception("Не удалось отправить UDS запрос")
+                global_error_handler.handle_error(
+                    error,
+                    severity=ErrorSeverity.RECOVERABLE,
+                    category=ErrorCategory.PROTOCOL,
+                    context={"service_id": f"0x{service_id:02X}"},
+                    recovery_hint="Проверьте соединение с ЭБУ"
+                )
                 return None
-        
-        else:
-            logger.warning(f"Неожиданный SID ответа: 0x{response_sid:02X}")
-            return response
+            
+            # Прием ответа
+            if timeout is None:
+                timeout = config.ISO_TP_TIMEOUT
+            
+            response = self.isotp.receive(timeout=timeout)
+            
+            if response is None:
+                error = Exception(f"Timeout ожидания UDS ответа (SID 0x{service_id:02X})")
+                global_error_handler.handle_error(
+                    error,
+                    severity=ErrorSeverity.RECOVERABLE,
+                    category=ErrorCategory.TIMEOUT,
+                    context={"service_id": f"0x{service_id:02X}", "timeout": timeout},
+                    recovery_hint="Увеличьте timeout или проверьте связь с ЭБУ"
+                )
+                return None
+            
+            logger.debug(f"UDS Response: {response.hex().upper()}")
+            
+            # Проверка ответа
+            if len(response) < 1:
+                logger.error("Пустой ответ UDS")
+                return None
+            
+            response_sid = response[0]
+            
+            # Положительный ответ
+            if response_sid == service_id + POSITIVE_RESPONSE_OFFSET:
+                logger.info(f"✅ UDS положительный ответ на сервис 0x{service_id:02X}")
+                return response[1:]  # Возвращаем данные без SID
+            
+            # Отрицательный ответ
+            elif response_sid == NEGATIVE_RESPONSE:
+                if len(response) >= 3:
+                    requested_sid = response[1]
+                    nrc = response[2]
+                    nrc_desc = NRC_DESCRIPTIONS.get(nrc, f"Unknown NRC: 0x{nrc:02X}")
+                    logger.error(f"❌ UDS отрицательный ответ: SID=0x{requested_sid:02X}, NRC=0x{nrc:02X} ({nrc_desc})")
+                    
+                    # Определение серьёзности на основе NRC
+                    severity = ErrorSeverity.WARNING if nrc == 0x78 else ErrorSeverity.RECOVERABLE
+                    
+                    error = UDSException(f"Negative response: {nrc_desc} (0x{nrc:02X})")
+                    global_error_handler.handle_error(
+                        error,
+                        severity=severity,
+                        category=ErrorCategory.PROTOCOL,
+                        context={"nrc": f"0x{nrc:02X}", "service_id": f"0x{service_id:02X}"}
+                    )
+                    raise error
+                else:
+                    logger.error("Некорректный отрицательный ответ UDS")
+                    return None
+            
+            else:
+                logger.warning(f"⚠️ Неожиданный SID ответа: 0x{response_sid:02X}")
+                return response
+                
+        except UDSException:
+            raise  # Пробрасываем UDSException дальше
+        except Exception as e:
+            global_error_handler.handle_error(
+                e,
+                severity=ErrorSeverity.RECOVERABLE,
+                category=ErrorCategory.PROTOCOL,
+                context={"service_id": f"0x{service_id:02X}"}
+            )
+            raise
     
     def diagnostic_session_control(self, session_type: int = EXTENDED_DIAGNOSTIC_SESSION) -> bool:
         """Управление диагностической сессией (0x10)"""

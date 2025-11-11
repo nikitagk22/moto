@@ -7,6 +7,8 @@ import config
 from j2534_wrapper import J2534Wrapper
 from isotp_handler import ISOTPHandler
 from uds_client import UDSClient, EXTENDED_DIAGNOSTIC_SESSION
+from error_handler import global_error_handler, ErrorSeverity, ErrorCategory, DiagnosticError
+from diagnostic_report import global_diagnostic_reporter
 
 logger = logging.getLogger(__name__)
 

@@ -2,6 +2,8 @@
 
 Комплексный Python-скрипт для низкоуровневой диагностики Harley-Davidson XG750A с использованием Tactrix OpenPort 2.0 и J2534 PassThru API.
 
+Дополнительные файлы с инструкциями: [Руководство по экспериментальному поиску параметров](https://github.com/nikitagk22/moto/blob/main/EXPERIMENTAL_GUIDE.md), [Быстрый старт](https://github.com/nikitagk22/moto/blob/main/QUICKSTART.md), [Пошаговая инструкция](https://github.com/nikitagk22/moto/blob/main/STEP_BY_STEP.md)
+
 ## 🔧 Технические характеристики
 
 - **Адаптер**: Tactrix OpenPort 2.0 (J2534 PassThru)

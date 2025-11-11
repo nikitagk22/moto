@@ -4,6 +4,7 @@ import time
 from typing import Optional, List, Tuple
 
 import config
+from error_handler import global_error_handler, ErrorSeverity, ErrorCategory
 
 logger = logging.getLogger(__name__)
 

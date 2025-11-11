@@ -285,32 +285,72 @@ class HarleyDiagnostics:
             logger.error(f"Ошибка при отключении: {e}")
     
     def read_vin(self) -> Optional[str]:
-        """Чтение VIN (идентификационного номера транспортного средства)"""
+        """Чтение VIN (идентификационного номера транспортного средства) с retry"""
         if not self.connected:
-            logger.error("Не подключено к мотоциклу")
+            error = Exception("Не подключено к мотоциклу")
+            global_error_handler.handle_error(
+                error,
+                severity=ErrorSeverity.CRITICAL,
+                category=ErrorCategory.CONNECTION,
+                recovery_hint="Сначала выполните подключение командой connect()"
+            )
             return None
         
         logger.info("-" * 60)
         logger.info("🔍 Чтение VIN...")
         
         try:
-            data = self.uds.read_data_by_identifier(config.DIDS['VIN'])
-            
-            if data and len(data) == 17:
-                vin = data.decode('ascii', errors='ignore')
-                # Проверка формата VIN (не должен содержать I, O, Q)
-                if all(c not in 'IOQ' for c in vin.upper()):
-                    logger.info(f"✅ VIN: {vin}")
-                    return vin
-                else:
-                    logger.warning(f"⚠️ VIN содержит недопустимые символы: {vin}")
-                    return vin
-            else:
-                logger.error(f"❌ Некорректная длина VIN: {len(data) if data else 0} байт")
-                return None
+            # Retry механизм для чтения VIN
+            def _read_vin_attempt():
+                data = self.uds.read_data_by_identifier(config.DIDS['VIN'])
                 
+                if not data:
+                    raise Exception("Не получены данные VIN от ЭБУ")
+                
+                # Валидация длины
+                if len(data) != 17:
+                    raise ValueError(f"Некорректная длина VIN: {len(data)} байт (ожидается 17)")
+                
+                # Декодирование
+                try:
+                    vin = data.decode('ascii')
+                except UnicodeDecodeError:
+                    vin = data.decode('ascii', errors='ignore')
+                    logger.warning("⚠️ VIN содержит не-ASCII символы, использована замена")
+                
+                # Валидация формата VIN
+                if not vin.replace(' ', '').isalnum():
+                    logger.warning(f"⚠️ VIN содержит неожиданные символы: {vin}")
+                
+                # Проверка на недопустимые символы (I, O, Q не используются в VIN)
+                invalid_chars = [c for c in vin.upper() if c in 'IOQ']
+                if invalid_chars:
+                    logger.warning(f"⚠️ VIN содержит недопустимые символы: {', '.join(set(invalid_chars))}")
+                
+                logger.info(f"✅ VIN успешно прочитан: {vin}")
+                return vin
+            
+            # Попытка чтения с retry
+            vin = global_error_handler.retry_with_recovery(
+                _read_vin_attempt,
+                max_attempts=2,  # VIN критичен, но достаточно 2 попыток
+                initial_delay=0.5,
+                error_category=ErrorCategory.DATA
+            )
+            
+            return vin
+                
+        except DiagnosticError as e:
+            logger.error(f"❌ Диагностическая ошибка чтения VIN: {e.message}")
+            return None
         except Exception as e:
             logger.error(f"❌ Ошибка чтения VIN: {e}")
+            global_error_handler.handle_error(
+                e,
+                severity=ErrorSeverity.RECOVERABLE,
+                category=ErrorCategory.DATA,
+                recovery_hint="Убедитесь, что зажигание включено и связь с ЭБУ стабильна"
+            )
             return None
     
     def scan_for_odometer(self, start_did: int = 0xF191, end_did: int = 0xF1A0) -> Optional[Dict[str, Any]]:

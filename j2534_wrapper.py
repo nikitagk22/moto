@@ -201,14 +201,22 @@ class J2534Wrapper:
             raise
     
     def close_device(self):
-        """Закрытие устройства J2534"""
+        """Закрытие устройства J2534 с обработкой ошибок"""
         if self.device_id is not None:
-            result = self.dll.PassThruClose(self.device_id)
             try:
+                result = self.dll.PassThruClose(self.device_id)
                 self._check_error(result, "PassThruClose")
-                logger.info("Устройство закрыто")
-            except J2534Exception:
-                logger.warning("Ошибка при закрытии устройства")
+                logger.info("✅ Устройство закрыто")
+            except J2534Exception as e:
+                logger.warning(f"⚠️ Ошибка при закрытии устройства: {e}")
+                global_error_handler.handle_error(
+                    e,
+                    severity=ErrorSeverity.WARNING,
+                    category=ErrorCategory.HARDWARE,
+                    recovery_hint="Устройство может быть уже закрыто или отключено"
+                )
+            except Exception as e:
+                logger.error(f"❌ Неожиданная ошибка при закрытии: {e}")
             finally:
                 self.device_id = None
     

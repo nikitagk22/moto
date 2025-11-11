@@ -137,6 +137,34 @@ class J2534Wrapper:
         if result != STATUS_NOERROR:
             error_msg = J2534_ERRORS.get(result, f"Unknown error code: {result}")
             logger.error(f"{function_name} failed: {error_msg} (0x{result:02X})")
+            
+            # Определение категории и серьёзности
+            if result == ERR_DEVICE_NOT_CONNECTED:
+                category = ErrorCategory.HARDWARE
+                severity = ErrorSeverity.CRITICAL
+                hint = "Проверьте подключение OpenPort 2.0 к USB порту"
+            elif result == ERR_TIMEOUT:
+                category = ErrorCategory.TIMEOUT
+                severity = ErrorSeverity.RECOVERABLE
+                hint = "Увеличьте timeout или проверьте соединение"
+            elif result == ERR_INVALID_CHANNEL_ID or result == ERR_INVALID_DEVICE_ID:
+                category = ErrorCategory.CONFIGURATION
+                severity = ErrorSeverity.CRITICAL
+                hint = "Переподключите устройство и попробуйте снова"
+            else:
+                category = ErrorCategory.HARDWARE
+                severity = ErrorSeverity.RECOVERABLE
+                hint = f"J2534 ошибка: {error_msg}"
+            
+            # Регистрация ошибки
+            global_error_handler.handle_error(
+                J2534Exception(f"{function_name}: {error_msg} (0x{result:02X})"),
+                severity=severity,
+                category=category,
+                context={"function": function_name, "error_code": result},
+                recovery_hint=hint
+            )
+            
             raise J2534Exception(f"{function_name}: {error_msg} (0x{result:02X})")
     
     def open_device(self) -> int:
